@@ -1,83 +1,50 @@
-# AWS Infrastructure with Terraform
+# Terraform Infrastructure
 
 ## Overview
 
-This repository contains the Infrastructure as Code (IaC) implementation for the **AI Healthcare Platform**.
+This repository contains the Terraform Infrastructure as Code (IaC) implementation for the AI Healthcare Platform.
 
-Terraform is used to provision and manage the AWS infrastructure required to run the platform in a reproducible, version-controlled, and environment-aware manner.
+Terraform is used to define, provision, and manage the AWS infrastructure in a reproducible, modular, and version-controlled manner.
 
-The infrastructure is designed around the following principles:
+The Terraform configuration is divided into four main modules:
 
-- Infrastructure as Code
-- Reproducibility
-- Least-privilege access
-- Network isolation
-- Secure container image management
-- Temporary GitHub Actions AWS credentials
-- Kubernetes workload isolation
-- Infrastructure recovery
-- Modular Terraform design
-- Cost awareness
+- VPC
+- IAM
+- ECR
+- EKS
+
+This README documents only the Terraform infrastructure and its design.
 
 ---
 
-# Architecture
+## Terraform Architecture
 
 ```text
-                         Internet
-                            |
-                            v
-                    +----------------+
-                    |   AWS VPC      |
-                    |                |
-                    | Public Subnets |
-                    +-------+--------+
-                            |
-                            v
-                    +----------------+
-                    | Load Balancer  |
-                    +-------+--------+
-                            |
-                            v
-                 +----------------------+
-                 |   Amazon EKS Cluster |
-                 |                      |
-                 |  Kubernetes Workloads|
-                 +----------+-----------+
-                            |
-          +-----------------+------------------+
-          |                 |                  |
-          v                 v                  v
-      API Pods         AI Service Pods     Worker Pods
-          |                 |                  |
-          +-----------------+------------------+
-                            |
-             +--------------+--------------+
-             |                             |
-             v                             v
-       Redis / Queue                 PostgreSQL
+                         Terraform Root
+                              |
+             +----------------+----------------+
+             |                |                |
+             v                v                v
+           VPC              IAM              ECR
+             |
+             | private subnet IDs
+             v
+            EKS
              |
              v
-        Background Jobs
-             |
-             v
-          Mock EHR
-
-
-        GitHub Actions
-              |
-              | OIDC
-              v
-      AWS IAM Role
-              |
-              v
-             ECR
-              |
-              v
-      Container Images
+       AWS Infrastructure
 ```
 
-Terraform provisions the AWS infrastructure layer, while Kubernetes manages the application workloads.
+### Module Responsibilities
+
+| Module | Responsibility |
+|---|---|
+| VPC | Creates the AWS networking foundation |
+| IAM | Creates and manages required IAM resources |
+| ECR | Creates private container repositories |
+| EKS | Creates the Kubernetes infrastructure |
+
+The VPC module provides networking information to the EKS module through Terraform outputs and variables.
 
 ---
 
@@ -94,6 +61,7 @@ ai-healthcare-terraform/
 ├── terraform.tfvars
 │
 └── modules/
+    │
     ├── vpc/
     │   ├── main.tf
     │   ├── variables.tf
@@ -115,1035 +83,136 @@ ai-healthcare-terraform/
         └── outputs.tf
 ```
 
-The infrastructure is divided into reusable modules so individual components can be modified without placing the entire infrastructure configuration in one large Terraform file.
-
 ---
 
-# Terraform Module Architecture
+# Root Terraform Configuration
+
+The root Terraform configuration is responsible for combining the infrastructure modules and passing values between them.
+
+## `main.tf`
+
+`main.tf` defines the Terraform modules used by the project.
+
+The root configuration connects the modules together.
+
+The main dependency is:
 
 ```text
-                    Terraform Root
-                         |
-        +----------------+----------------+
-        |                |                |
-        v                v                v
-      VPC              IAM              ECR
-        |                |                |
-        +----------------+----------------+
-                         |
-                         v
-                        EKS
-                         |
-                         v
-                  Kubernetes Cluster
-```
-
-The main modules are:
-
-- VPC
-- IAM
-- ECR
-- EKS
-
----
-
-# 1. VPC
-
-The VPC provides the network boundary for the infrastructure.
-
-The VPC architecture separates public-facing infrastructure from private infrastructure.
-
-```text
-                    VPC
-                     |
-          +----------+----------+
-          |                     |
-          v                     v
-   Public Subnets        Private Subnets
-          |                     |
-    Load Balancer          EKS Nodes
-                                |
-                                v
-                         Application Pods
-```
-
-## Public Subnets
-
-Public subnets are intended for components that require controlled internet-facing connectivity, such as a load balancer.
-
-## Private Subnets
-
-Private subnets are used for internal infrastructure and workloads.
-
-The objective is to avoid directly exposing internal services such as:
-
-- AI service
-- Worker
-- Redis
-- PostgreSQL
-- Kubernetes internal services
-
-to the public internet.
-
----
-
-# 2. IAM
-
-IAM controls which AWS resources and APIs can be accessed by users, workloads, and automation.
-
-The infrastructure follows the principle of:
-
-> Least privilege
-
-IAM is used for:
-
-- EKS cluster access
-- EKS node permissions
-- ECR access
-- GitHub Actions authentication
-- AWS service integration
-
----
-
-# 3. GitHub Actions OIDC
-
-The CI/CD pipeline uses OpenID Connect (OIDC) to authenticate GitHub Actions with AWS.
-
-```text
-GitHub Actions
-      |
-      | OIDC Token
-      v
-AWS IAM OIDC Provider
-      |
-      v
-GitHub Actions IAM Role
-      |
-      v
-AWS Services
-```
-
-This avoids storing permanent AWS access keys in GitHub repository secrets.
-
-The IAM trust relationship can restrict which GitHub repository and branch can assume the role.
-
----
-
-# 4. Amazon ECR
-
-Amazon Elastic Container Registry is used as the private container image registry.
-
-The project uses separate repositories for the application services:
-
-```text
-ai-healthcare-dev-api
-ai-healthcare-dev-ai-service
-ai-healthcare-dev-worker
-ai-healthcare-dev-mock-ehr
-```
-
-Architecture:
-
-```text
-GitHub Actions
-      |
-      v
-Docker Build
-      |
-      v
-Security Scans
-      |
-      v
-Amazon ECR
-      |
-      v
+VPC
+ |
+ | private_subnet_ids
+ v
 EKS
 ```
 
-ECR provides private image storage for the application containers.
+The EKS module does not need to hardcode subnet IDs. It receives the subnet information generated by the VPC module.
 
-Image scanning is enabled to help identify vulnerabilities in container images.
+This makes the infrastructure reproducible and avoids manually copying AWS resource IDs.
 
 ---
 
-# 5. Amazon EKS
+## `providers.tf`
 
-Amazon EKS provides the managed Kubernetes control plane used for running the application workloads.
+`providers.tf` defines the Terraform provider configuration.
 
-The application architecture consists of multiple independent services:
+The AWS provider is used to create and manage AWS resources.
+
+The project uses the AWS region:
 
 ```text
-EKS
- |
- +-- API
- |
- +-- AI Service
- |
- +-- Worker
- |
- +-- Mock EHR
- |
- +-- Redis
- |
- +-- PostgreSQL
+ap-south-1
 ```
 
-Kubernetes provides:
-
-- Service discovery
-- Pod scheduling
-- Health checks
-- Automatic pod replacement
-- Rolling deployments
-- Resource management
-- Workload isolation
+Provider configuration is kept separate from individual infrastructure modules.
 
 ---
 
-# Application Architecture on Kubernetes
+## `variables.tf`
 
-The application follows an asynchronous processing model.
+`variables.tf` defines configurable Terraform inputs.
 
-```text
-                         Client
-                           |
-                           v
-                         API
-                           |
-                 +---------+---------+
-                 |                   |
-                 v                   v
-             AI Service          Redis Queue
-                                     |
-                                     v
-                                   Worker
-                                     |
-                                     v
-                                  Mock EHR
-                                     |
-                                     v
-                                 PostgreSQL
-```
+Variables allow the same Terraform modules to be reused with different configuration values.
 
-## API
+Typical variables include:
 
-The API is the primary application entry point.
+- AWS region
+- Environment
+- VPC configuration
+- Subnet configuration
+- EKS configuration
+- ECR configuration
+- Resource naming values
 
-Responsibilities include:
-
-- Accepting requests
-- Creating jobs
-- Placing jobs into Redis
-- Reading job state
-- Providing health endpoints
-- Exposing application metrics
-
-## AI Service
-
-The AI service represents an internal AI/agent component.
-
-It provides a lightweight simulation of AI processing rather than a production healthcare AI system.
-
-## Redis
-
-Redis acts as the background job queue.
-
-The API places jobs into Redis and the worker consumes them asynchronously.
-
-## Worker
-
-The worker processes queued jobs.
-
-Responsibilities include:
-
-- Reading jobs from Redis
-- Processing jobs
-- Calling the Mock EHR
-- Updating PostgreSQL
-- Retrying failed jobs
-- Exposing worker metrics
-
-## PostgreSQL
-
-PostgreSQL stores persistent application and job state.
-
-A persistent volume is used so database state is not tied to the lifetime of a container.
-
-## Mock EHR
-
-The Mock EHR represents an external healthcare dependency.
-
-It allows the project to simulate successful communication and EHR failures without connecting to a real healthcare system.
-
----
-
-# Security Architecture
-
-Security is implemented at multiple layers.
-
-```text
-                 Security Layers
-                       |
-       +---------------+---------------+
-       |               |               |
-       v               v               v
-   Network          Identity       Containers
-   Security          Security        Security
-       |               |               |
-       v               v               v
-     VPC              IAM          Non-root
-   Subnets           OIDC         containers
-  Isolation       Least Privilege
-                       |
-                       v
-                 CI/CD Security
-                       |
-          +------------+------------+
-          |            |            |
-          v            v            v
-       Gitleaks     SonarCloud     Trivy
-```
-
----
-
-# Network Security
-
-The intended traffic flow is:
-
-```text
-Internet
-   |
-   v
-Controlled Entry Point
-   |
-   v
-API
-   |
-   +--> Internal AI Service
-   |
-   +--> Redis Queue
-          |
-          v
-        Worker
-          |
-          v
-       Mock EHR
-          |
-          v
-      PostgreSQL
-```
-
-Internal services should not be exposed directly to the public internet.
-
-Examples include:
-
-- Redis
-- PostgreSQL
-- Worker
-- AI service
-- Internal service endpoints
-
----
-
-# Container Security
-
-Application containers use non-root execution where compatible with the image.
-
-Example Kubernetes security controls:
-
-```yaml
-securityContext:
-  runAsNonRoot: true
-  allowPrivilegeEscalation: false
-  capabilities:
-    drop:
-      - ALL
-```
-
-Application containers can use dedicated application users rather than running application processes as root.
+Instead of hardcoding values inside modules, values are passed through variables.
 
 Example:
 
-```dockerfile
-RUN useradd --create-home --uid 10001 appuser
-USER 10001
+```hcl
+variable "region" {
+  type        = string
+  description = "AWS region"
+}
 ```
-
-Security hardening should remain compatible with the base image. Third-party images should not be given incompatible settings that prevent the service from starting.
 
 ---
 
-# Secret Management
+## `terraform.tfvars`
 
-Secrets should not be committed to Git.
+`terraform.tfvars` contains values for the Terraform variables.
 
-Local environment files such as:
+Example:
+
+```hcl
+region      = "ap-south-1"
+environment = "dev"
+```
+
+The purpose of `terraform.tfvars` is to separate configuration values from the reusable Terraform module implementation.
+
+Sensitive credentials should not be stored in `terraform.tfvars` when the file is committed to version control.
+
+---
+
+## `outputs.tf`
+
+`outputs.tf` exposes values generated by Terraform resources and modules.
+
+Outputs are useful when one module needs information produced by another module.
+
+For example:
 
 ```text
-.env
-```
-
-are excluded from version control.
-
-Application configuration is injected at runtime.
-
-Examples include:
-
-```text
-POSTGRES_PASSWORD
-POSTGRES_USER
-POSTGRES_DB
-```
-
-Sensitive configuration should be provided through appropriate runtime secret mechanisms rather than hardcoded in source code or container images.
-
----
-
-# CI/CD Security
-
-The CI/CD pipeline performs multiple validation and security checks.
-
-```text
-Git Push
-   |
-   v
-Gitleaks
-   |
-   v
-Python Tests
-   |
-   v
-Ruff
-   |
-   v
-SonarCloud
-   |
-   v
-Docker Build
-   |
-   v
-Trivy
-   |
-   v
-ECR Push
-   |
-   v
-Helm Image Update
-```
-
----
-
-# Gitleaks
-
-Gitleaks searches the repository for accidentally committed secrets.
-
-Examples include:
-
-- API keys
-- Tokens
-- Passwords
-- Cloud credentials
-
-A detected secret should cause the security stage to fail.
-
----
-
-# SonarCloud
-
-SonarCloud is used for static analysis.
-
-It helps identify:
-
-- Code quality issues
-- Potential bugs
-- Maintainability issues
-- Security-related code findings
-
-Each service can have its own SonarCloud project.
-
----
-
-# Trivy
-
-Trivy scans container images for vulnerabilities.
-
-The pipeline is configured to fail when high or critical vulnerabilities are detected according to the configured scan policy.
-
-This creates a deployment safety gate before images are pushed to the registry.
-
----
-
-# Terraform State
-
-Terraform state records the resources managed by Terraform.
-
-A remote backend can provide:
-
-- Centralized state
-- State locking
-- Collaboration support
-- Reduced risk of local state loss
-
-The exact backend configuration should be treated as authoritative in `backend.tf`.
-
----
-
-# Terraform Workflow
-
-The normal Terraform workflow is:
-
-```text
-Write Terraform
-      |
-      v
-terraform fmt
-      |
-      v
-terraform init
-      |
-      v
-terraform validate
-      |
-      v
-terraform plan
-      |
-      v
-Review Changes
-      |
-      v
-terraform apply
-      |
-      v
-AWS Infrastructure
-```
-
-For infrastructure removal:
-
-```bash
-terraform destroy
-```
-
----
-
-# Reproducibility
-
-Terraform makes infrastructure reproducible.
-
-Instead of manually creating:
-
-- VPCs
-- Subnets
-- IAM roles
-- ECR repositories
-- EKS clusters
-
-the infrastructure is defined as code.
-
-A new environment can therefore be created using the Terraform configuration and appropriate variables.
-
----
-
-# Environment Awareness
-
-Environment-specific values should be provided through variables.
-
-Examples include:
-
-```text
-environment
-region
-cluster name
-subnet configuration
-instance configuration
-repository configuration
-```
-
-The same module structure can therefore be reused for different environments.
-
-```text
-dev
- |
- +-- VPC
- +-- ECR
- +-- IAM
- +-- EKS
-
-
-production-like
- |
- +-- VPC
- +-- ECR
- +-- IAM
- +-- EKS
-```
-
----
-
-# Infrastructure Recovery
-
-Terraform supports infrastructure recovery.
-
-If infrastructure is accidentally removed or needs to be recreated, Terraform can reconstruct the declared infrastructure.
-
-```text
-Terraform Configuration
-          |
-          v
-       terraform plan
-          |
-          v
-     Missing Resources
-          |
-          v
-     terraform apply
-          |
-          v
- Recreated Infrastructure
-```
-
-Infrastructure recreation and persistent data recovery are separate concerns.
-
-Terraform can recreate infrastructure, while database data requires an appropriate backup and recovery mechanism.
-
----
-
-# Reliability
-
-The infrastructure supports reliability through multiple mechanisms.
-
-## Kubernetes Health Checks
-
-The API uses:
-
-```text
-/health
-/ready
-```
-
-These allow Kubernetes to determine whether the application is running and ready to receive traffic.
-
-## Pod Replacement
-
-If a worker pod fails, Kubernetes can replace it through the Deployment controller.
-
-```text
-Worker Pod
+VPC Module
     |
-    X
-Failure
-    |
-    v
-Deployment Controller
-    |
-    v
-New Worker Pod
+    +-- VPC ID
+    +-- Public Subnet IDs
+    +-- Private Subnet IDs
+             |
+             v
+        EKS Module
 ```
 
-## Queue-Based Processing
-
-Redis provides buffering between the API and worker.
-
-```text
-API
- |
- v
-Redis Queue
- |
- +---- Job 1
- +---- Job 2
- +---- Job 3
- |
- v
-Worker
-```
-
-This allows queue depth to be monitored during increased workload.
+The VPC module can expose private subnet IDs and the root configuration can pass those values into the EKS module.
 
 ---
 
-# Failure Simulation
+## `backend.tf`
 
-The project supports controlled failure simulations.
+`backend.tf` defines the Terraform state backend configuration.
 
-## Worker Failure
+Terraform state stores information about the resources managed by Terraform.
 
-The worker pod can be deleted intentionally.
+The backend is responsible for determining where Terraform state is stored and how it is managed.
 
-Kubernetes detects the missing replica and creates a replacement.
+The exact backend configuration used by this project is defined in `backend.tf`.
 
-```text
-Failure
-   ↓
-Detection
-   ↓
-Replacement
-   ↓
-Recovery
-   ↓
-Verification
-```
-
-## EHR Failure
-
-The Mock EHR can be switched into failure mode.
-
-The worker then experiences an external dependency failure and demonstrates retry behavior using the configured maximum attempt count.
-
-```text
-Worker
-   |
-   v
-Mock EHR
-   |
-   X
-Failure
-   |
-   v
-Retry
-   |
-   v
-Retry
-   |
-   v
-Final Failure
-```
-
-This demonstrates that an external dependency failure can be isolated from the API layer.
+Terraform state should be protected because it contains infrastructure information and may contain sensitive resource attributes.
 
 ---
 
-# Observability
+# VPC Module
 
-The application exposes metrics for monitoring.
-
-Prometheus collects metrics from:
-
-```text
-API --------\
-             \
-Worker -------> Prometheus
-                    |
-                    v
-                 Grafana
-```
-
-The project monitors operational signals such as:
-
-- API availability
-- API latency
-- API errors
-- Queue depth
-- Worker failures
-- Worker retries
-- Worker processing time
-- CPU utilization
-- Memory utilization
-- Deployment state
-
----
-
-# Alerting
-
-The project includes alerts for important operational conditions.
-
-## APIDown
-
-Triggers when the API is unavailable.
-
-```text
-API unavailable
-      |
-      v
-Prometheus detects condition
-      |
-      v
-Alert
-```
-
-## HighAPILatency
-
-Detects unusually high API response latency.
-
-This can indicate:
-
-- Application slowdown
-- Resource pressure
-- Dependency problems
-- Increased workload
-
-## QueueBacklog
-
-Detects an increasing Redis queue depth.
-
-This can indicate that jobs are arriving faster than workers can process them.
-
-## WorkerJobFailures
-
-Detects failed background jobs.
-
-This helps identify failures in job processing or dependencies.
-
-## WorkerRetries
-
-Detects repeated retry activity.
-
-A high retry rate can indicate an unstable external dependency.
-
-## SlowWorkerProcessing
-
-Detects unusually slow worker processing.
-
-This can indicate:
-
-- Increased workload
-- Slow dependencies
-- Resource pressure
-- Application processing issues
-
----
-
-# Deployment Safety
-
-The CI/CD pipeline validates an application before deployment.
-
-The intended flow is:
-
-```text
-Code
- |
- v
-Tests
- |
- v
-Security Checks
- |
- v
-Docker Build
- |
- v
-Image Scan
- |
- v
-Container Registry
- |
- v
-Deployment
- |
- v
-Health Verification
-```
-
-A security failure should prevent an unsafe artifact from progressing through the deployment pipeline.
-
----
-
-# Rolling Deployment
-
-Kubernetes Deployments provide controlled application updates.
-
-Conceptually:
-
-```text
-Old Version
-     |
-     v
-New Version
-     |
-     v
-Health Checks
-     |
- +---+---+
- |       |
- v       v
-Healthy Unhealthy
- |       |
- v       v
-Continue Stop/Rollback
-```
-
-The objective is to prevent an unhealthy version from replacing a known healthy application version without validation.
-
----
-
-# Cost Awareness
-
-Potential AWS cost areas include:
-
-- EKS
-- EC2/node infrastructure
-- Load balancers
-- ECR storage
-- NAT gateways
-- S3
-- CloudWatch
-- Data transfer
-
-Development environments should avoid unnecessarily large infrastructure.
-
-Resources should be destroyed when they are no longer required:
-
-```bash
-terraform destroy
-```
-
----
-
-# Terraform Commands
-
-## Initialize
-
-```bash
-terraform init
-```
-
-## Format
-
-```bash
-terraform fmt -recursive
-```
-
-## Validate
-
-```bash
-terraform validate
-```
-
-## Plan
-
-```bash
-terraform plan
-```
-
-## Apply
-
-```bash
-terraform apply
-```
-
-## Destroy
-
-```bash
-terraform destroy
-```
-
-## Show State
-
-```bash
-terraform show
-```
-
-## List Resources
-
-```bash
-terraform state list
-```
-
----
-
-# Security Checklist
-
-Before deploying infrastructure:
-
-- [ ] No secrets committed to Git
-- [ ] `.env` files ignored
-- [ ] IAM follows least privilege
-- [ ] GitHub Actions uses OIDC
-- [ ] ECR repositories are private
-- [ ] Container images are scanned
-- [ ] Source code is statically analyzed
-- [ ] Secret scanning is enabled
-- [ ] Internal services are not publicly exposed
-- [ ] Kubernetes workloads use appropriate security contexts
-- [ ] Health checks are configured
-- [ ] Resource requests and limits are configured
-- [ ] Infrastructure changes are reviewed using Terraform plan
-- [ ] Backup/recovery strategy is documented
-- [ ] Infrastructure can be recreated
-
----
-
-# What Terraform Owns
-
-Terraform is responsible for infrastructure such as:
-
-```text
-AWS
- |
- +-- VPC
- |    +-- Subnets
- |    +-- Networking
- |
- +-- IAM
- |    +-- Roles
- |    +-- Policies
- |    +-- GitHub OIDC
- |
- +-- ECR
- |    +-- Container repositories
- |
- +-- EKS
-      +-- Kubernetes cluster infrastructure
-```
-
-Application workloads are managed separately using Kubernetes and Helm.
-
----
-
-# Relationship Between Terraform, Kubernetes and CI/CD
-
-The layers have different responsibilities.
-
-```text
-              Terraform
-                  |
-                  v
-          AWS Infrastructure
-                  |
-                  v
-               EKS
-                  |
-                  v
-             Kubernetes
-                  |
-                  v
-          Application Workloads
-                  ^
-                  |
-             Helm / Argo CD
-                  ^
-                  |
-             GitHub Actions
-                  ^
-                  |
-                Git
-```
-
-### Terraform
-
-Creates infrastructure.
-
-### Kubernetes
-
-Runs and manages application workloads.
-
-### Helm
-
-Packages and configures Kubernetes resources.
-
-### Argo CD
-
-Provides GitOps-based synchronization of Kubernetes configuration.
-
-### GitHub Actions
-
-Automates testing, security validation, container builds, image publishing, and deployment configuration updates.
-
----
-
-# Security and Reliability Trade-offs
-
-Security and reliability controls must be balanced with compatibility and operational simplicity.
-
+The VPC module creates the networking foundation f# AWS Infrastructure with Terraform
 Examples:
 
 - Non-root containers reduce process privileges.
@@ -1192,3 +261,744 @@ This project is an infrastructure and reliability simulation.
 It does **not** represent a production healthcare platform and does not use real patient data or a real healthcare/EHR system.
 
 The Mock EHR is used only to simulate an external dependency so that failure, retry, recovery, and observability behavior can be demonstrated safely.
+or the AWS infrastructure.
+
+```text
+VPC
+ |
+ +-- Public Subnets
+ |
+ +-- Private Subnets
+ |
+ +-- Routing
+ |
+ +-- Network Configuration
+```
+
+The VPC provides network isolation and defines where AWS resources are placed.
+
+## Public and Private Subnets
+
+The network separates public and private resources.
+
+```text
+                         VPC
+                          |
+              +-----------+-----------+
+              |                       |
+              v                       v
+       Public Subnets          Private Subnets
+              |                       |
+       Public Resources          Internal Resources
+```
+
+Private subnets are used for resources that should not require direct public exposure.
+
+The EKS module consumes the private subnet IDs produced by the VPC module.
+
+---
+
+## VPC Module Inputs
+
+The VPC module can be parameterized using variables such as:
+
+- VPC CIDR
+- Public subnet CIDRs
+- Private subnet CIDRs
+- Availability zones
+- Environment name
+
+This allows the network configuration to be changed without rewriting the module.
+
+---
+
+## VPC Module Outputs
+
+The VPC module exposes values required by other infrastructure components.
+
+Important outputs include:
+
+- VPC ID
+- Public subnet IDs
+- Private subnet IDs
+
+The private subnet IDs are particularly important because they are passed to the EKS module.
+
+---
+
+# IAM Module
+
+The IAM module manages the IAM resources required by the Terraform-managed infrastructure.
+
+```text
+IAM
+ |
+ +-- Roles
+ |
+ +-- Policies
+ |
+ +-- Policy Attachments
+```
+
+The module keeps identity and permission configuration separate from networking and compute resources.
+
+## IAM Security
+
+The IAM configuration follows the principle of least privilege.
+
+Permissions should be limited to what each resource actually requires.
+
+The Terraform configuration should avoid unnecessarily granting broad permissions such as full administrator access when a narrower permission set is sufficient.
+
+### IAM principles
+
+- Least privilege
+- Explicit permissions
+- Separation of roles
+- Avoid unnecessary wildcard permissions
+- Avoid unnecessary administrator-level access
+- Review permissions when infrastructure changes
+
+---
+
+# ECR Module
+
+The ECR module creates and manages private Amazon Elastic Container Registry repositories.
+
+The project contains repositories for the application services.
+
+```text
+ECR
+ |
+ +-- ai-healthcare-dev-api
+ |
+ +-- ai-healthcare-dev-ai-service
+ |
+ +-- ai-healthcare-dev-worker
+ |
+ +-- ai-healthcare-dev-mock-ehr
+```
+
+## ECR Security Configuration
+
+The ECR repositories use infrastructure-level security controls such as:
+
+- Private repositories
+- Immutable image tags
+- Image scanning
+- Encryption
+
+### Private repositories
+
+Container images are not publicly exposed.
+
+### Immutable tags
+
+Immutable tags prevent an existing image tag from being silently overwritten with a different image.
+
+This improves image traceability.
+
+### Image scanning
+
+Image scanning helps identify vulnerabilities in container images stored in ECR.
+
+### Encryption
+
+ECR repositories use encryption for stored images.
+
+---
+
+# EKS Module
+
+The EKS module manages the Kubernetes infrastructure in AWS.
+
+```text
+EKS
+ |
+ +-- Cluster
+ |
+ +-- Cluster Configuration
+ |
+ +-- Networking Configuration
+ |
+ +-- Node Infrastructure
+```
+
+The EKS module receives its networking configuration from the VPC module.
+
+```text
+VPC Module
+     |
+     | private_subnet_ids
+     v
+EKS Module
+     |
+     v
+EKS Cluster
+```
+
+This creates a clear Terraform dependency between networking and Kubernetes infrastructure.
+
+---
+
+# Terraform Module Dependency
+
+The complete dependency flow is:
+
+```text
+                     Terraform Root
+                           |
+          +----------------+----------------+
+          |                |                |
+          v                v                v
+         VPC              IAM              ECR
+          |
+          | private subnet IDs
+          v
+         EKS
+```
+
+### Dependency explanation
+
+1. Terraform root calls the VPC module.
+2. The VPC module creates the networking resources.
+3. The VPC module exposes subnet IDs through outputs.
+4. The root Terraform configuration passes the required subnet IDs to the EKS module.
+5. The EKS module creates the Kubernetes infrastructure using the supplied networking configuration.
+6. IAM and ECR are managed through their dedicated modules.
+
+This structure keeps each module focused on its own responsibility.
+
+---
+
+# Parameterization
+
+Terraform uses variables to avoid hardcoding infrastructure-specific values.
+
+For example:
+
+```text
+                 Terraform Modules
+                        |
+              +---------+---------+
+              |                   |
+              v                   v
+          Development       Production-like
+              |                   |
+              v                   v
+       Environment Values  Environment Values
+```
+
+The same modules can be reused while changing environment-specific values.
+
+Benefits include:
+
+- Reusability
+- Consistency
+- Easier environment management
+- Reduced duplication
+- Easier infrastructure changes
+
+---
+
+# Infrastructure Lifecycle
+
+Terraform manages the infrastructure lifecycle using a predictable workflow.
+
+```text
+Terraform Code
+      |
+      v
+terraform init
+      |
+      v
+terraform validate
+      |
+      v
+terraform plan
+      |
+      v
+terraform apply
+      |
+      v
+AWS Infrastructure
+      |
+      v
+terraform destroy
+```
+
+Each stage has a specific purpose.
+
+---
+
+# Terraform Workflow
+
+## 1. Format
+
+```bash
+terraform fmt -recursive
+```
+
+Formats Terraform files consistently.
+
+---
+
+## 2. Initialize
+
+```bash
+terraform init
+```
+
+Initializes the Terraform working directory.
+
+This downloads the required providers and initializes the configured backend.
+
+---
+
+## 3. Validate
+
+```bash
+terraform validate
+```
+
+Checks the Terraform configuration for syntax and configuration errors.
+
+---
+
+## 4. Plan
+
+```bash
+terraform plan
+```
+
+Creates an execution plan showing what Terraform intends to create, modify, or destroy.
+
+The plan should be reviewed before applying changes.
+
+---
+
+## 5. Apply
+
+```bash
+terraform apply
+```
+
+Creates or updates the AWS infrastructure according to the Terraform configuration.
+
+---
+
+## 6. Show State
+
+```bash
+terraform show
+```
+
+Displays the current Terraform state information.
+
+---
+
+## 7. List Resources
+
+```bash
+terraform state list
+```
+
+Lists resources currently tracked by Terraform.
+
+---
+
+## 8. Destroy
+
+```bash
+terraform destroy
+```
+
+Destroys infrastructure managed by the Terraform configuration.
+
+This is useful for removing development infrastructure that is no longer required.
+
+---
+
+# Terraform State
+
+Terraform state maintains the relationship between the Terraform configuration and the actual AWS infrastructure.
+
+```text
+Terraform Configuration
+          |
+          v
+     Terraform State
+          |
+          v
+     AWS Resources
+```
+
+Terraform uses state to determine:
+
+- Existing resources
+- Resources that need to be created
+- Resources that need to be changed
+- Resources that need to be removed
+
+State is therefore an important part of the infrastructure lifecycle.
+
+---
+
+# State Security
+
+Terraform state should be treated as sensitive infrastructure information.
+
+Recommended practices include:
+
+- Use a secure backend
+- Restrict access to state
+- Enable encryption where supported
+- Enable state locking where supported
+- Do not commit unnecessary state files to Git
+- Do not expose state publicly
+
+State security is important because resource attributes and infrastructure configuration can be present in the state.
+
+---
+
+# Infrastructure Reproducibility
+
+Terraform allows the infrastructure to be recreated from code instead of manually configuring AWS resources.
+
+The basic process is:
+
+```bash
+terraform init
+terraform validate
+terraform plan
+terraform apply
+```
+
+The same Terraform module structure can therefore be used to reproduce the infrastructure.
+
+This reduces configuration drift caused by manual AWS Console changes.
+
+---
+
+# Infrastructure Recovery
+
+Terraform supports infrastructure recreation when infrastructure needs to be rebuilt.
+
+```text
+Terraform Code
+      |
+      v
+terraform plan
+      |
+      v
+Identify Required Resources
+      |
+      v
+terraform apply
+      |
+      v
+Infrastructure Recreated
+```
+
+Terraform infrastructure recovery and application data recovery are separate concerns.
+
+### Infrastructure recovery
+
+Terraform can recreate resources such as:
+
+- VPC
+- Subnets
+- IAM resources
+- ECR repositories
+- EKS infrastructure
+
+### Persistent data recovery
+
+Terraform does not replace a database backup and recovery strategy.
+
+Persistent data recovery requires an appropriate backup mechanism.
+
+---
+
+# Terraform Security Controls
+
+The infrastructure is designed with security considerations at the Terraform layer.
+
+## Network isolation
+
+The VPC separates public and private networking.
+
+Internal infrastructure can be placed in private subnets rather than exposing every resource publicly.
+
+## Least-privilege IAM
+
+IAM roles and policies should provide only the permissions required by the associated AWS resources.
+
+## Private ECR
+
+Container repositories are private rather than publicly accessible.
+
+## Immutable ECR tags
+
+Immutable tags prevent an existing image tag from being overwritten.
+
+## ECR scanning
+
+Image scanning provides vulnerability detection for container images stored in ECR.
+
+## Encryption
+
+ECR image storage uses encryption.
+
+## No hardcoded secrets
+
+Credentials and sensitive values should not be hardcoded into Terraform modules.
+
+Sensitive configuration should be provided through appropriate secure mechanisms.
+
+---
+
+# Environment Management
+
+Terraform modules are designed to be reusable across environments.
+
+```text
+                Terraform Modules
+                       |
+            +----------+----------+
+            |                     |
+            v                     v
+           Dev          Production-like
+            |                     |
+            v                     v
+       Configuration        Configuration
+```
+
+Environment-specific values should be supplied through variables rather than creating completely separate copies of the infrastructure code.
+
+---
+
+# Resource Naming
+
+A consistent naming convention makes AWS infrastructure easier to identify.
+
+The project uses names based on the project and environment.
+
+Example:
+
+```text
+ai-healthcare-dev
+```
+
+For individual resources, a consistent pattern can be used:
+
+```text
+<project>-<environment>-<resource>
+```
+
+This helps identify the purpose and environment of AWS resources.
+
+---
+
+# Terraform Best Practices
+
+This Terraform repository follows these principles:
+
+- Infrastructure is defined as code
+- Infrastructure is version controlled
+- Modules have focused responsibilities
+- Configuration uses variables
+- Module communication uses outputs and inputs
+- Networking is separated from compute
+- IAM permissions follow least privilege
+- ECR repositories are private
+- ECR tags are immutable
+- Image scanning is enabled
+- Encryption is used where configured
+- Secrets are not hardcoded
+- Terraform state is protected
+- `terraform plan` is reviewed before applying changes
+- Development infrastructure can be destroyed when no longer required
+
+---
+
+# What Terraform Manages
+
+The Terraform repository manages the infrastructure represented by its Terraform resources.
+
+The main infrastructure areas are:
+
+```text
+Terraform
+   |
+   +-- VPC
+   |    |
+   |    +-- VPC
+   |    +-- Subnets
+   |    +-- Routing
+   |
+   +-- IAM
+   |    |
+   |    +-- Roles
+   |    +-- Policies
+   |
+   +-- ECR
+   |    |
+   |    +-- Container Repositories
+   |
+   +-- EKS
+        |
+        +-- Kubernetes Infrastructure
+```
+
+Terraform is responsible for the infrastructure foundation.
+
+Application-level configuration and application workloads are outside the scope of this Terraform README.
+
+---
+
+# Terraform-Specific Troubleshooting
+
+## Initialization error
+
+Run:
+
+```bash
+terraform init
+```
+
+If provider versions or module dependencies need to be refreshed:
+
+```bash
+terraform init -upgrade
+```
+
+---
+
+## Validation error
+
+Run:
+
+```bash
+terraform validate
+```
+
+Read the reported file and line number and correct the Terraform configuration.
+
+---
+
+## Formatting issues
+
+Run:
+
+```bash
+terraform fmt -recursive
+```
+
+---
+
+## Unexpected plan
+
+Run:
+
+```bash
+terraform plan
+```
+
+Review the proposed changes carefully.
+
+Do not apply unexpected infrastructure changes until the reason for the change is understood.
+
+---
+
+## Inspect Terraform state
+
+List resources:
+
+```bash
+terraform state list
+```
+
+Inspect state:
+
+```bash
+terraform show
+```
+
+State should not be manually modified unless the consequences are understood.
+
+---
+
+# Recommended Infrastructure Workflow
+
+```text
+1. Modify Terraform configuration
+            |
+            v
+2. terraform fmt -recursive
+            |
+            v
+3. terraform validate
+            |
+            v
+4. terraform plan
+            |
+            v
+5. Review planned changes
+            |
+            v
+6. terraform apply
+            |
+            v
+7. Verify infrastructure
+```
+
+For infrastructure cleanup:
+
+```bash
+terraform destroy
+```
+
+---
+
+# Summary
+
+This repository implements the AWS infrastructure for the AI Healthcare Platform using Terraform.
+
+The infrastructure is organized into reusable modules:
+
+```text
+VPC
+ |
+ +-- Networking
+
+IAM
+ |
+ +-- Identity and Permissions
+
+ECR
+ |
+ +-- Private Container Repositories
+
+EKS
+ |
+ +-- Kubernetes Infrastructure
+```
+
+The modular Terraform architecture provides:
+
+- Reusable infrastructure
+- Clear module responsibilities
+- Parameterized configuration
+- Module dependencies through inputs and outputs
+- Reproducible infrastructure
+- Controlled infrastructure changes
+- Network isolation
+- Least-privilege IAM
+- Private ECR repositories
+- Immutable container tags
+- Image scanning
+- Encryption
+- Infrastructure recreation and recovery
+
+Terraform therefore provides a consistent and reproducible way to create, modify, and destroy the AWS infrastructure required by the project.
