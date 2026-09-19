@@ -239,16 +239,9 @@ The resulting architecture demonstrates:
 - Modular Terraform
 - AWS networking
 - IAM and least privilege
-- GitHub Actions OIDC
 - Private ECR
 - Kubernetes infrastructure
-- Secure container deployment
-- CI/CD security validation
-- Application reliability
-- Failure recovery
-- Observability
-- Infrastructure recreation
-- Cost awareness
+
 
 The objective is not simply to provision AWS resources, but to demonstrate how infrastructure, application delivery, security, reliability, and observability work together as one operational system.
 
