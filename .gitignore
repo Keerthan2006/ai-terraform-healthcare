@@ -1,2 +1,18 @@
-ai-healthcare-terraform/terraform.tfvars
-terraform.tfvars
+# Terraform
+**/.terraform/
+
+# Terraform state
+*.tfstate
+*.tfstate.*
+
+# Terraform variables
+*.tfvars
+*.tfvars.json
+
+# Terraform plans
+*.tfplan
+tfplan
+
+# Crash logs
+crash.log
+crash.*.log
