@@ -12,6 +12,7 @@ on:
       - main
     paths:
       - "ai-healthcare-terraform/**"
+      - ".github/workflows/**"
 
 env:
   TF_WORKDIR: ai-healthcare-terraform
@@ -39,3 +40,14 @@ jobs:
           role-to-assume: ${{ secrets.AWS_ROLE_ARN }}
       - name: check aws configuration
         run: aws sts get-caller-identity
+      - name: terraform format
+        run: terraform fmt
+      - name: Run Checkov action
+        uses: bridgecrewio/checkov-action@master
+        with:
+          directory: ${{ env.TF_WORKDIR }}
+          soft_fail: true # FOR TESTING ONLY
+          framework: terraform
+      - name: terraform validate
+        run: terraform validate
+
