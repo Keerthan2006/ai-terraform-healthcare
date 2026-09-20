@@ -6,6 +6,7 @@ on:
       - main
     paths:
       - "ai-healthcare-terraform/**"
+      - ".github/workflows/**"
 
   pull_request:
     branches:
