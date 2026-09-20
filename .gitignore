@@ -5,10 +5,6 @@
 *.tfstate
 *.tfstate.*
 
-# Terraform variables
-*.tfvars
-*.tfvars.json
-
 # Terraform plans
 *.tfplan
 tfplan
