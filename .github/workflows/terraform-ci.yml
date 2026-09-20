@@ -49,6 +49,8 @@ jobs:
           directory: ${{ env.TF_WORKDIR }}
           soft_fail: true # FOR TESTING ONLY
           framework: terraform
+      - name: terraform intialization
+        run: terraform init
       - name: terraform validate
         run: terraform validate
 
