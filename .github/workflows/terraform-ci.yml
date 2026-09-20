@@ -1,0 +1,41 @@
+name: Terraform CI
+
+on:
+  push:
+    branches:
+      - main
+    paths:
+      - "ai-healthcare-terraform/**"
+
+  pull_request:
+    branches:
+      - main
+    paths:
+      - "ai-healthcare-terraform/**"
+
+env:
+  TF_WORKDIR: ai-healthcare-terraform
+
+permissions:
+  contents: read
+  id-token: write
+
+jobs:
+  terraform-checks:
+    name: terraform checks 
+    runs-on: ubuntu-latest
+    defaults:
+      run:
+        working-directory: ${{ env.TF_WORKDIR }}
+    steps:
+      - name: checkout repo
+        uses: actions/checkout@v4
+      - name: terraform setup
+        uses: hashicorp/setup-terraform@v4
+      - name: Configure AWS Credentials 
+        uses: aws-actions/configure-aws-credentials@v6.3.0
+        with:
+          aws-region: ap-south-1
+          role-to-assume: ${{ secrets.AWS_ROLE_ARN }}
+      - name: check aws configuration
+        run: aws sts get-caller-identity
