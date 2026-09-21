@@ -79,10 +79,15 @@ jobs:
         run: terraform init
       - name: terraform plan command
         run: terraform plan -out=tfplan
+      - name: upload plan artifact
+        uses: actions/upload-artifact@v7
+        with:
+          name: terrraform-plan
+          path: ${{ env.TF_WORKDIR }}/tfplan
   terraform-apply:
     if: github.event_name == 'push' && github.ref == 'refs/heads/main'
     needs: terraform-plan
-    name: terraform plan
+    name: terraform apply
     runs-on: ubuntu-latest
     defaults:
       run:
@@ -101,6 +106,11 @@ jobs:
         run: aws sts get-caller-identity
       - name: terraform init
         run: terraform init
+      - name: download terraform artifact
+        uses: actions/download-artifact@v8
+        with:
+          name: terraform-plan
+          path: ${{ env.TF_WORKDIR }}
       - name: terraform apply command
         run: terraform apply -auto-approve tfplan
 
