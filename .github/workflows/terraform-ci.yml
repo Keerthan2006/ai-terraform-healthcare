@@ -82,7 +82,7 @@ jobs:
       - name: upload plan artifact
         uses: actions/upload-artifact@v7
         with:
-          name: terrraform-plan
+          name: terraform-plan
           path: ${{ env.TF_WORKDIR }}/tfplan
   terraform-apply:
     if: github.event_name == 'push' && github.ref == 'refs/heads/main'
