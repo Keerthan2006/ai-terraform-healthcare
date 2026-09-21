@@ -12,3 +12,9 @@ tfplan
 # Crash logs
 crash.log
 crash.*.log
+
+# Plan Output
+tfplan
+*.tfplan
+**/tfplan
+**/.tfplan

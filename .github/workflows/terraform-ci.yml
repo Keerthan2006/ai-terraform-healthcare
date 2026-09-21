@@ -14,6 +14,9 @@ on:
     paths:
       - "ai-healthcare-terraform/**"
       - ".github/workflows/**"
+concurrency:
+  group: terraform-${{ github.repository }}
+  cancel-in-progress: false
 
 env:
   TF_WORKDIR: ai-healthcare-terraform
@@ -42,7 +45,7 @@ jobs:
       - name: check aws configuration
         run: aws sts get-caller-identity
       - name: terraform format
-        run: terraform fmt
+        run: terraform fmt -check
       - name: Run Checkov action
         uses: bridgecrewio/checkov-action@master
         with:
@@ -75,4 +78,29 @@ jobs:
       - name: terraform init
         run: terraform init
       - name: terraform plan command
-        run: terraform plan
+        run: terraform plan -out=tfplan
+  terraform-apply:
+    if: github.event_name == 'push' && github.ref == 'refs/heads/main'
+    needs: terraform-plan
+    name: terraform plan
+    runs-on: ubuntu-latest
+    defaults:
+      run:
+        working-directory: ${{ env.TF_WORKDIR }}
+    steps:
+      - name: checkout repo
+        uses: actions/checkout@v4
+      - name: terraform setup
+        uses: hashicorp/setup-terraform@v4
+      - name: Configure AWS Credentials 
+        uses: aws-actions/configure-aws-credentials@v6.3.0
+        with:
+          aws-region: ap-south-1
+          role-to-assume: ${{ secrets.AWS_ROLE_ARN }}
+      - name: check aws configuration
+        run: aws sts get-caller-identity
+      - name: terraform init
+        run: terraform init
+      - name: terraform apply command
+        run: terraform apply -auto-approve tfplan
+
